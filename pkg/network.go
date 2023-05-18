@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -177,4 +178,21 @@ func PostWithHeaders(url string, data string, headers map[string]string) string 
 	}
 	bodyString := string(bodyBytes)
 	return bodyString
+}
+
+func Download(destinationPath, downloadUrl string) error {
+	tempDestinationPath := destinationPath + ".tmp"
+	req, _ := http.NewRequest("GET", downloadUrl, nil)
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+
+	f, _ := os.OpenFile(tempDestinationPath, os.O_CREATE|os.O_WRONLY, 0644)
+	fileName := destinationPath[strings.LastIndex(destinationPath, "/")+1:]
+	bar := progressbar.DefaultBytes(
+		resp.ContentLength,
+		fileName,
+	)
+	io.Copy(io.MultiWriter(f, bar), resp.Body)
+	os.Rename(tempDestinationPath, destinationPath)
+	return nil
 }

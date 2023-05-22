@@ -27,28 +27,28 @@ func fetchArticle(articleId int, Headers map[string]string) string {
 	Headers["Origin"] = "https://time.geekbang.org"
 	Headers["Content-Type"] = "application/json"
 	data := fmt.Sprintf(`{"id":"%v","include_neighbors":true,"is_freelyread":true}`, articleId)
-	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/article", data, Headers)
+	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/article", data, Headers, 3)
 }
 
 func fetchChapters(courseId int, Headers map[string]string) string {
 	Headers["Origin"] = "https://time.geekbang.org"
 	Headers["Content-Type"] = "application/json"
 	data := fmt.Sprintf(`{"cid":"%v"}`, courseId)
-	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/chapters", data, Headers)
+	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/chapters", data, Headers, 3)
 }
 
-func fetchArticles(ChapterIds []string, Headers map[string]string) string {
+func fetchArticles(cid int, ChapterIds []string, Headers map[string]string) string {
 	Headers["Origin"] = "https://time.geekbang.org"
 	Headers["Content-Type"] = "application/json"
-	data := fmt.Sprintf(`{"cid":48,"size":100,"prev":0,"order":"earliest","sample":false,"chapter_ids":["%v"]}`, strings.Join(ChapterIds, `","`))
-	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/column/articles", data, Headers)
+	data := fmt.Sprintf(`{"cid":%v,"size":100,"prev":0,"order":"earliest","sample":false,"chapter_ids":["%v"]}`, cid, strings.Join(ChapterIds, `","`))
+	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v1/column/articles", data, Headers, 3)
 }
 
-func fetchCourseInfo(courseId int, Headers map[string]string) string {
-	Headers["Origin"] = "https://time.geekbang.org"
-	Headers["Content-Type"] = "application/json"
-	data := fmt.Sprintf(`{"product_id":%v,"with_recommend_article":true}`, courseId)
-	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v3/column/info", data, Headers)
+func fetchCourseInfo(courseID int, headers map[string]string) string {
+	headers["Origin"] = "https://time.geekbang.org"
+	headers["Content-Type"] = "application/json"
+	data := fmt.Sprintf(`{"product_id":%v,"with_recommend_article":true}`, courseID)
+	return pkg.PostWithHeaders("https://time.geekbang.org/serv/v3/column/info", data, headers, 3)
 }
 
 func main() {
@@ -58,8 +58,8 @@ func main() {
 	json.Unmarshal([]byte(courseStr), &course)
 	courseTitle := course.Data.Title
 	pkg.Mkdir(courseTitle)
-
-	fetchChaptersStr := fetchChapters(course.Data.Extra.Cid, Headers)
+	cid := course.Data.Extra.Cid
+	fetchChaptersStr := fetchChapters(cid, Headers)
 	var chapters structs.Chapters
 	json.Unmarshal([]byte(fetchChaptersStr), &chapters)
 	chapterIds := []string{}
@@ -68,7 +68,7 @@ func main() {
 		chapterIds = append(chapterIds, chapter.ID)
 	}
 
-	fetchArticlesStr := fetchArticles(chapterIds, Headers)
+	fetchArticlesStr := fetchArticles(cid, chapterIds, Headers)
 	var articles structs.Articles
 	json.Unmarshal([]byte(fetchArticlesStr), &articles)
 
@@ -85,18 +85,19 @@ func main() {
 				break
 			}
 		}
-		fileName := courseTitle + "/" + subDir + "/" + articleTitle
+		fileName := pkg.CleanFileName(courseTitle) + "/" + pkg.CleanFileName(subDir) + "/" + pkg.CleanFileName(articleTitle)
 
 		// check if file exists
 		if _, err := os.Stat(fileName + ".mp3"); err == nil {
 			log.Info("File exists, skip")
-			time.Sleep(1 * time.Second)
+			time.Sleep(3 * time.Second)
 			continue
 		}
 
 		markdown := pkg.HtmlToMarkdown(article.Data.ArticleContent)
 		pkg.Mkdir(courseTitle + "/" + subDir)
 		pkg.WriteToFile(fileName+".md", markdown)
-		pkg.Download(fileName+".mp3", article.Data.AudioDownloadURL)
+		pkg.DownloadFile(article.Data.AudioDownloadURL, fileName+".mp3")
+		fmt.Println("")
 	}
 }

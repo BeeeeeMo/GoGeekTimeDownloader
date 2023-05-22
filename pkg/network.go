@@ -1,42 +1,25 @@
 package pkg
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"runtime"
 	"strings"
+	"time"
 
-	"github.com/schollz/progressbar/v3"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
-func DownloadFile(url string, path string) {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36")
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-	defer resp.Body.Close()
-	// Create the file
-	out, err := os.Create(path)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-	defer out.Close()
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		log.Error(err)
-		return
+var log = logrus.New()
+
+func init() {
+	log.SetReportCaller(true)
+	log.Formatter = &logrus.TextFormatter{
+		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
+			return "", fmt.Sprintf("%s:%d", f.File, f.Line)
+		},
 	}
 }
 
@@ -50,41 +33,6 @@ func Fetch(url string) string {
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Error(err)
-		return ""
-	}
-
-	if resp.StatusCode != 200 {
-		log.Error(fmt.Sprintf("Status code error: %v", resp.StatusCode))
-		return ""
-	}
-
-	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-
-	if err != nil {
-		log.Error(err)
-		return ""
-	}
-	bodyString := string(bodyBytes)
-	return bodyString
-}
-
-func FetchWithHeaders(url string, headers map[string]string) string {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	log.Info("Fetching: ", url)
-	if err != nil {
-		log.Error(err)
-		return ""
-	}
-
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -141,31 +89,40 @@ func Post(url string, data string) string {
 	return bodyString
 }
 
-func PostWithHeaders(url string, data string, headers map[string]string) string {
+func retryRequests(req *http.Request, retry int) (*http.Response, error) {
 	client := &http.Client{}
-	dataReader := io.Reader(strings.NewReader(data))
-	req, err := http.NewRequest("POST", url, dataReader)
-	log.Info("Fetching: ", url)
+	var resp *http.Response
+	var err error
+
+	for i := 0; i <= retry; i++ {
+		resp, err = client.Do(req)
+
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+
+		log.Error(fmt.Sprintf("Request failure: %v, retrying (%d/%d)..", err, i+1, retry+1))
+		time.Sleep(time.Second * 10)
+	}
+
+	return resp, errors.New(fmt.Sprintf("Max retries reached (%d). Last error: %v", retry, err))
+}
+
+func FetchWithHeaders(url string, headers map[string]string, retry int) string {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Error(err)
 		return ""
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36")
 
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := retryRequests(req, retry)
+
 	if err != nil {
 		log.Error(err)
-		return ""
-	}
-
-	if resp.StatusCode != 200 {
-		log.Error(fmt.Sprintf("Status code error: %v", resp.StatusCode))
 		return ""
 	}
 
@@ -180,19 +137,35 @@ func PostWithHeaders(url string, data string, headers map[string]string) string 
 	return bodyString
 }
 
-func Download(destinationPath, downloadUrl string) error {
-	tempDestinationPath := destinationPath + ".tmp"
-	req, _ := http.NewRequest("GET", downloadUrl, nil)
-	resp, _ := http.DefaultClient.Do(req)
-	defer resp.Body.Close()
+func PostWithHeaders(url string, data string, headers map[string]string, retry int) string {
+	dataReader := io.Reader(strings.NewReader(data))
+	req, err := http.NewRequest("POST", url, dataReader)
+	if err != nil {
+		log.Error(err)
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36")
 
-	f, _ := os.OpenFile(tempDestinationPath, os.O_CREATE|os.O_WRONLY, 0644)
-	fileName := destinationPath[strings.LastIndex(destinationPath, "/")+1:]
-	bar := progressbar.DefaultBytes(
-		resp.ContentLength,
-		fileName,
-	)
-	io.Copy(io.MultiWriter(f, bar), resp.Body)
-	os.Rename(tempDestinationPath, destinationPath)
-	return nil
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := retryRequests(req, retry)
+
+	if err != nil {
+		log.Error(err, data)
+		return ""
+	}
+
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		log.Error(err)
+		return ""
+	}
+
+	bodyString := string(bodyBytes)
+	return bodyString
 }

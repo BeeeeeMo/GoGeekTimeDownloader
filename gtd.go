@@ -7,7 +7,6 @@ import (
 	"gtd/structs"
 	"os"
 	"strings"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -74,30 +73,29 @@ func main() {
 
 	for _, article := range articles.Data.List {
 		log.Info(article.ArticleTitle)
-		articleStr := fetchArticle(article.ID, Headers)
-		var article structs.Article
-		json.Unmarshal([]byte(articleStr), &article)
-		articleTitle := article.Data.ArticleTitle
 		var subDir string
 		for i, v := range chapters.Data {
-			if v.ID == article.Data.ChapterID {
+			if v.ID == article.ChapterID {
 				subDir = fmt.Sprintf("%v-%v", i+1, v.Title)
 				break
 			}
 		}
+		articleTitle := article.ArticleTitle
 		fileName := pkg.CleanFileName(courseTitle) + "/" + pkg.CleanFileName(subDir) + "/" + pkg.CleanFileName(articleTitle)
-
 		// check if file exists
 		if _, err := os.Stat(fileName + ".mp3"); err == nil {
 			log.Info("File exists, skip")
-			time.Sleep(3 * time.Second)
 			continue
 		}
 
-		markdown := pkg.HtmlToMarkdown(article.Data.ArticleContent)
+		articleStr := fetchArticle(article.ID, Headers)
+		var articleData structs.Article
+		json.Unmarshal([]byte(articleStr), &articleData)
+
+		markdown := pkg.HtmlToMarkdown(articleData.Data.ArticleContent)
 		pkg.Mkdir(courseTitle + "/" + subDir)
 		pkg.WriteToFile(fileName+".md", markdown)
-		pkg.DownloadFile(article.Data.AudioDownloadURL, fileName+".mp3")
+		pkg.DownloadFile(articleData.Data.AudioDownloadURL, fileName+".mp3")
 		fmt.Println("")
 	}
 }

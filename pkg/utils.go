@@ -1,7 +1,7 @@
 package pkg
 
 import (
-	"encoding/base64"
+	"crypto/md5"
 	"fmt"
 	"net/url"
 	"os"
@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/longbridgeapp/opencc"
 )
 
 func CleanFileName(name string) string {
@@ -31,7 +32,11 @@ func HtmlToMarkdown(html string) string {
 	converter := md.NewConverter("", true, nil)
 	markdown, _ := converter.ConvertString(html)
 	// regex to find all the image urls
-	regex := regexp.MustCompile(`!\[.*\]\((.*)\?.+\)`)
+	return markdown
+}
+
+func MdImgToLocal(markdown, path string) string {
+	regex := regexp.MustCompile(`!\[.*\]\((.*)\)`)
 	// enumerate all the image urls
 	for _, url := range regex.FindAllStringSubmatch(markdown, -1) {
 		img := Fetch(url[1])
@@ -40,10 +45,16 @@ func HtmlToMarkdown(html string) string {
 			log.Error(err)
 			continue
 		}
-		imgb64 := base64.StdEncoding.EncodeToString([]byte(img))
-		markdown = strings.Replace(markdown, url[1], "data:image/"+extension+";base64,"+imgb64, 1)
+		imgName := genStringMD5(url[1]) + "." + extension
+		WriteToFile(path+"/images/"+imgName, img)
+		markdown = strings.Replace(markdown, url[1], "../images/"+imgName, -1)
+		log.Info(url[1])
 	}
 	return markdown
+}
+
+func genStringMD5(s string) string {
+	return fmt.Sprintf("%x", md5.Sum([]byte(s)))
 }
 
 func getExtensionFromUrl(urlStr string) (string, error) {
@@ -56,11 +67,30 @@ func getExtensionFromUrl(urlStr string) (string, error) {
 	if index == -1 {
 		return "", nil
 	}
+
 	extension := filename[index+1:]
+	// remove query string
+	index = strings.Index(extension, "?")
+	if index != -1 {
+		extension = extension[:index]
+	}
 	return extension, nil
 }
 
 // mkdir
 func Mkdir(path string) {
 	os.MkdirAll(path, os.ModePerm)
+}
+
+func S2T(s string) string {
+	s2t, err := opencc.New("s2t")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	out, err := s2t.Convert(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return out
 }

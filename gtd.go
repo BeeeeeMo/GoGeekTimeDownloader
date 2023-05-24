@@ -55,8 +55,9 @@ func main() {
 	var course structs.CourseInfo
 
 	json.Unmarshal([]byte(courseStr), &course)
-	courseTitle := course.Data.Title
+	courseTitle := pkg.S2T(course.Data.Title)
 	pkg.Mkdir(courseTitle)
+	pkg.Mkdir(courseTitle + "/images")
 	cid := course.Data.Extra.Cid
 	fetchChaptersStr := fetchChapters(cid, Headers)
 	var chapters structs.Chapters
@@ -76,12 +77,13 @@ func main() {
 		var subDir string
 		for i, v := range chapters.Data {
 			if v.ID == article.ChapterID {
-				subDir = fmt.Sprintf("%v-%v", i+1, v.Title)
+				subDir = pkg.S2T(fmt.Sprintf("%v-%v", i+1, v.Title))
 				break
 			}
 		}
 		articleTitle := article.ArticleTitle
 		fileName := pkg.CleanFileName(courseTitle) + "/" + pkg.CleanFileName(subDir) + "/" + pkg.CleanFileName(articleTitle)
+		fileName = pkg.S2T(fileName)
 		// check if file exists
 		if _, err := os.Stat(fileName + ".mp3"); err == nil {
 			log.Info("File exists, skip")
@@ -93,8 +95,10 @@ func main() {
 		json.Unmarshal([]byte(articleStr), &articleData)
 
 		markdown := pkg.HtmlToMarkdown(articleData.Data.ArticleContent)
+		markdown = pkg.MdImgToLocal(markdown, courseTitle+"/")
 		pkg.Mkdir(courseTitle + "/" + subDir)
-		pkg.WriteToFile(fileName+".md", markdown)
+		pkg.WriteToFile(fileName+".md", pkg.S2T(markdown))
+
 		pkg.DownloadFile(articleData.Data.AudioDownloadURL, fileName+".mp3")
 		fmt.Println("")
 	}
